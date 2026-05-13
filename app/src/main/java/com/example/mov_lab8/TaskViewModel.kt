@@ -1,53 +1,60 @@
 package com.example.mov_lab8
 
+import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-
 class TaskViewModel(private val dao: TaskDao) : ViewModel() {
-
-
-    // Estado para la lista de tareas
     private val _tasks = MutableStateFlow<List<Task>>(emptyList())
     val tasks: StateFlow<List<Task>> = _tasks
 
+    var filterMode by mutableStateOf("Todas")
 
-    init {
-        // Al inicializar, cargamos las tareas de la base de datos
-        viewModelScope.launch {
-            _tasks.value = dao.getAllTasks()
-        }
+    init { loadTasks() }
+
+    private fun loadTasks() {
+        viewModelScope.launch { _tasks.value = dao.getAllTasks() }
     }
 
-
-    // Función para añadir una nueva tarea
     fun addTask(description: String) {
-        val newTask = Task(description = description)
         viewModelScope.launch {
-            dao.insertTask(newTask)
-            _tasks.value = dao.getAllTasks() // Recargamos la lista
+            dao.insertTask(Task(description = description))
+            loadTasks()
         }
     }
 
-
-    // Función para alternar el estado de completado de una tarea
     fun toggleTaskCompletion(task: Task) {
         viewModelScope.launch {
-            val updatedTask = task.copy(isCompleted = !task.isCompleted)
-            dao.updateTask(updatedTask)
-            _tasks.value = dao.getAllTasks() // Recargamos la lista
+            dao.updateTask(task.copy(isCompleted = !task.isCompleted))
+            loadTasks()
         }
     }
 
+    fun deleteTask(task: Task) {
+        viewModelScope.launch {
+            dao.deleteTask(task)
+            loadTasks()
+        }
+    }
 
-    // Función para eliminar todas las tareas
     fun deleteAllTasks() {
         viewModelScope.launch {
             dao.deleteAllTasks()
-            _tasks.value = emptyList() // Vaciamos la lista en el estado
+            _tasks.value = emptyList()
         }
     }
+
+    val filteredTasks: StateFlow<List<Task>> = combine(_tasks, snapshotFlow { filterMode }) { tasks, mode ->
+        when (mode) {
+            "Pendientes" -> tasks.filter { !it.isCompleted }
+            "Completadas" -> tasks.filter { it.isCompleted }
+            else -> tasks
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 }

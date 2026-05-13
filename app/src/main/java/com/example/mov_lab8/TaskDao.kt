@@ -1,13 +1,13 @@
 package com.example.mov_lab8
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
 
 @Dao
 interface TaskDao {
-
     // Obtener todas las tareas
     @Query("SELECT * FROM tasks")
     suspend fun getAllTasks(): List<Task>
@@ -19,6 +19,9 @@ interface TaskDao {
     // Marcar una tarea como completada o no completada
     @Update
     suspend fun updateTask(task: Task)
+
+    @Delete // Característica 2: Eliminar tarea individual
+    suspend fun deleteTask(task: Task)
 
     // Eliminar todas las tareas
     @Query("DELETE FROM tasks")
