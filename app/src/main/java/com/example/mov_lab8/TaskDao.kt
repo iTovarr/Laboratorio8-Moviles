@@ -1,29 +1,21 @@
 package com.example.mov_lab8
 
-import androidx.room.Dao
-import androidx.room.Delete
-import androidx.room.Insert
-import androidx.room.Query
-import androidx.room.Update
+import androidx.room.*
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TaskDao {
-    // Obtener todas las tareas
+    // Eliminamos el ORDER BY de aquí para que el ViewModel
+    // se encargue de ordenar por Nombre, Fecha o Estado dinámicamente
     @Query("SELECT * FROM tasks")
-    suspend fun getAllTasks(): List<Task>
+    fun getAllTasks(): Flow<List<Task>>
 
-    // Insertar una nueva tarea
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTask(task: Task)
 
-    // Marcar una tarea como completada o no completada
     @Update
     suspend fun updateTask(task: Task)
 
-    @Delete // Característica 2: Eliminar tarea individual
+    @Delete
     suspend fun deleteTask(task: Task)
-
-    // Eliminar todas las tareas
-    @Query("DELETE FROM tasks")
-    suspend fun deleteAllTasks()
 }

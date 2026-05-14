@@ -1,60 +1,102 @@
 package com.example.mov_lab8
 
-import androidx.compose.runtime.*
+import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 class TaskViewModel(private val dao: TaskDao) : ViewModel() {
-    private val _tasks = MutableStateFlow<List<Task>>(emptyList())
-    val tasks: StateFlow<List<Task>> = _tasks
 
-    var filterMode by mutableStateOf("Todas")
+    // SOLUCIÓN AL "INPUT INVISIBLE": Usamos estado de Compose directo
+    // Esto hace que el TextField se actualice al instante mientras escribes
+    var searchQuery by mutableStateOf("")
 
-    init { loadTasks() }
+    private val _filterMode = MutableStateFlow("Todas")
+    private val _orderMode = MutableStateFlow("Fecha")
 
-    private fun loadTasks() {
-        viewModelScope.launch { _tasks.value = dao.getAllTasks() }
-    }
+    var filterMode: String
+        get() = _filterMode.value
+        set(value) { _filterMode.value = value }
 
-    fun addTask(description: String) {
+    var orderMode: String
+        get() = _orderMode.value
+        set(value) { _orderMode.value = value }
+
+    // Flujo principal: combinamos el snapshotFlow de la búsqueda con los demás flujos
+    val tasks = combine(
+        dao.getAllTasks(),
+        snapshotFlow { searchQuery }, // Convierte el estado de la barra de búsqueda en un flujo
+        _filterMode,
+        _orderMode
+    ) { list, query, filter, order ->
+
+        // 1. Buscamos (Punto 4)
+        var result = if (query.isEmpty()) list
+        else list.filter { it.description.contains(query, ignoreCase = true) }
+
+        // 2. Filtramos (Punto 3)
+        result = when (filter) {
+            "Pendientes" -> result.filter { !it.isCompleted }
+            "Completadas" -> result.filter { it.isCompleted }
+            "Alta Prioridad" -> result.filter { it.priority == Priority.HIGH }
+            else -> result
+        }
+
+        // 3. Ordenamos (Punto 5)
+        when (order) {
+            "Nombre" -> result.sortedBy { it.description }
+            "Estado" -> result.sortedBy { it.isCompleted }
+            "Fecha" -> result.sortedByDescending { it.createdAt }
+            else -> result
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    // --- Estadísticas en tiempo real (Punto 9) ---
+    val statsHoy = tasks.map { list ->
+        val hoy = list.filter { it.dateLabel.uppercase() == "HOY" }
+        if (hoy.isEmpty()) "0/0" else "${hoy.count { it.isCompleted }}/${hoy.size}"
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "0/0")
+
+    val statsMañana = tasks.map { list ->
+        val mañana = list.filter { it.dateLabel.uppercase() == "MAÑANA" }
+        if (mañana.isEmpty()) "0/0" else "${mañana.count { it.isCompleted }}/${mañana.size}"
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "0/0")
+
+    val statsSemana = tasks.map { list ->
+        val semana = list.filter { it.dateLabel.uppercase() == "SEMANA" }
+        if (semana.isEmpty()) "0/0" else "${semana.count { it.isCompleted }}/${semana.size}"
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "0/0")
+
+    // --- Funciones de Base de Datos ---
+
+    fun addTask(desc: String, priority: Priority, label: String) {
         viewModelScope.launch {
-            dao.insertTask(Task(description = description))
-            loadTasks()
+            val newTask = Task(description = desc, priority = priority, dateLabel = label)
+            dao.insertTask(newTask)
+            Log.d("CLOUD_SYNC", "Sincronizando nueva tarea: ${newTask.description}")
         }
     }
 
-    fun toggleTaskCompletion(task: Task) {
+    fun updateTask(task: Task) {
         viewModelScope.launch {
-            dao.updateTask(task.copy(isCompleted = !task.isCompleted))
-            loadTasks()
+            dao.updateTask(task)
+            Log.d("CLOUD_SYNC", "Actualizando cambios en la nube para ID: ${task.id}")
         }
     }
 
     fun deleteTask(task: Task) {
         viewModelScope.launch {
             dao.deleteTask(task)
-            loadTasks()
+            Log.d("CLOUD_SYNC", "Eliminando tarea de la nube...")
         }
     }
-
-    fun deleteAllTasks() {
-        viewModelScope.launch {
-            dao.deleteAllTasks()
-            _tasks.value = emptyList()
-        }
-    }
-
-    val filteredTasks: StateFlow<List<Task>> = combine(_tasks, snapshotFlow { filterMode }) { tasks, mode ->
-        when (mode) {
-            "Pendientes" -> tasks.filter { !it.isCompleted }
-            "Completadas" -> tasks.filter { it.isCompleted }
-            else -> tasks
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 }
